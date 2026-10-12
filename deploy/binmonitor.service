@@ -1,0 +1,32 @@
+# systemd service for running the bin monitor on a Linux server.
+#
+# Setup:
+#   sudo useradd --system --create-home --home-dir /var/lib/binmonitor binmonitor
+#   sudo cp binmonitor /usr/local/bin/
+#   sudo cp deploy/binmonitor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now binmonitor
+#
+# Check it with: sudo systemctl status binmonitor
+# See the logs with: sudo journalctl -u binmonitor -f
+
+[Unit]
+Description=Smart dustbin monitoring server for VIT Chennai
+After=network.target
+
+[Service]
+User=binmonitor
+WorkingDirectory=/var/lib/binmonitor
+ExecStart=/usr/local/bin/binmonitor
+Environment=PORT=8080
+Environment=DATA_DIR=/var/lib/binmonitor
+Environment=BIN_API_KEY=change_this_key
+Environment=DASHBOARD_PASSWORD=change_this_password
+# To read an Arduino plugged into this server, add the user to the dialout group
+# (sudo usermod -aG dialout binmonitor) and uncomment the next line.
+# Environment=SERIAL=auto
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

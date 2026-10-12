@@ -1,0 +1,19 @@
+# Start it with: docker compose up -d
+# Then open http://localhost:8080 (or the server IP)
+
+services:
+  binmonitor:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - bindata:/data
+    environment:
+      BIN_API_KEY: "change this to your own key"
+      DASHBOARD_PASSWORD: "change this too"
+      # turn the simulator on for a demo, leave it out for real use
+      # SIMULATOR: "on"
+
+volumes:
+  bindata:

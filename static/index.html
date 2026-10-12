@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIT Chennai Bin Monitor</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f2f2f2; color: #222; }
+  header { background: #1f4e79; color: white; padding: 12px 20px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header span { font-size: 13px; }
+  .container { padding: 15px 20px; }
+  .row { display: flex; gap: 15px; flex-wrap: wrap; }
+  .box { background: white; border: 1px solid #ccc; padding: 12px; margin-bottom: 15px; }
+  .box h2 { font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+
+  .side { flex: 1; min-width: 260px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+  th { background: #e6e6e6; }
+  .ok { color: #2e7d32; font-weight: bold; }
+  .half { color: #c77700; font-weight: bold; }
+  .full { color: #c62828; font-weight: bold; }
+  .offline { color: #777; font-weight: bold; }
+  .bar { background: #ddd; width: 100px; height: 12px; display: inline-block; vertical-align: middle; }
+  .bar div { height: 12px; }
+  .alert { border-left: 4px solid #c62828; padding: 5px 8px; margin-bottom: 6px; background: #fff5f5; font-size: 13px; }
+  .alert.LOW_BATTERY { border-color: #c77700; background: #fffaf0; }
+  .alert.OFFLINE { border-color: #777; background: #f7f7f7; }
+  .alert button { float: right; font-size: 12px; }
+  select { padding: 3px; }
+  .small { font-size: 12px; color: #666; }
+
+  /* hardware panel */
+  .hw { display: flex; gap: 20px; flex-wrap: wrap; }
+  .hwbin { border: 1px solid #ccc; padding: 10px; min-width: 260px; }
+  .hwbin h3 { margin: 0 0 8px 0; font-size: 15px; }
+  .lid { font-size: 22px; font-weight: bold; padding: 6px 10px; display: inline-block; border: 2px solid; }
+  .lid.open { color: #c62828; border-color: #c62828; background: #fff0f0; }
+  .lid.closed { color: #2e7d32; border-color: #2e7d32; background: #f0fff0; }
+  .handbar { background: #ddd; width: 200px; height: 14px; display: inline-block; vertical-align: middle; position: relative; }
+  .handbar div { height: 14px; background: #1f4e79; }
+  .handbar .mark { position: absolute; top: -3px; width: 2px; height: 20px; background: #c62828; left: 80px; }
+  #log { font-family: Consolas, monospace; font-size: 12px; height: 150px; overflow-y: auto; background: #fafafa; border: 1px solid #ddd; padding: 5px; flex: 1; min-width: 260px; }
+  #liveStatus { font-weight: bold; }
+  tr.flash td { background: #fff3c4; }
+  #demoBanner { display: none; background: #fff3c4; border: 2px solid #c77700; color: #6b4000; padding: 10px 14px; margin-bottom: 15px; font-size: 14px; }
+  .demo-box { border: 2px dashed #c77700; }
+  .demo-box h2 { color: #8a5300; }
+  .tag { font-size: 11px; font-weight: bold; padding: 1px 5px; border: 1px solid; }
+  .tag.real { color: #1f4e79; border-color: #1f4e79; }
+  .tag.sim { color: #8a5300; border-color: #c77700; background: #fff8e6; }
+  .tag.none { color: #777; border-color: #999; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Smart Dustbin Monitoring, VIT Chennai</h1>
+  <span>Live link: <span id="liveStatus">connecting</span>. Last update: <b id="updated">not yet</b></span>
+</header>
+
+<div class="container">
+
+  <div id="demoBanner">
+    <b>DEMO MODE IS ON.</b> Bins in the "Demo Section" below are <b>simulated</b> (made up readings from the simulator every 5 seconds).
+    Only bins in the "Real Bins" section and the "Connected Hardware" panel show data from actual hardware.
+    Zone summary, alerts and the cleaning route include both. Turn the simulator off to see only real data.
+  </div>
+
+  <div class="box">
+    <h2>Connected Hardware (real)</h2>
+    <div class="hw">
+      <div id="hwbins" class="hw">
+        <span class="small">No hardware connected. Plug in the Arduino and start the server with the serial option set to auto.</span>
+      </div>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="box" style="flex:2; min-width:300px; padding:0">
+      <div id="map" style="height:380px"></div>
+      <div class="small" style="padding:6px 10px">Map: a thick outline means real hardware is connected and a dashed outline means simulated. Green is under 50 percent, orange is 50 to 79 percent, red is 80 percent or more and grey is offline.</div>
+    </div>
+
+    <div class="side">
+      <div class="box">
+        <h2>Zone Summary <span id="zoneNote" class="small"></span></h2>
+        <table id="zones"></table>
+      </div>
+
+      <div class="box">
+        <h2>Open Alerts (<span id="alertCount">0</span>)</h2>
+        <div id="alerts" style="max-height:200px; overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="box">
+    <h2>Cleaning Route (bins above 60%, fullest first)</h2>
+    <div id="route" class="small">Loading</div>
+  </div>
+
+  <div class="box">
+    <h2>Real Bins (data from hardware)</h2>
+    <table id="realBins"></table>
+  </div>
+
+  <div class="box" id="simSection">
+    <h2 id="simTitle">Other Bins</h2>
+    <div id="simNote" class="small" style="margin-bottom:8px"></div>
+    Zone:
+    <select id="zoneFilter" onchange="loadBins()">
+      <option value="">All</option>
+      <option>Academic</option>
+      <option>Food</option>
+      <option>Hostel</option>
+      <option>Other</option>
+    </select>
+    <br><br>
+    <table id="bins"></table>
+  </div>
+
+</div>
+
+<script>
+// VIT Chennai campus center
+// map needs internet (leaflet + map tiles). if it fails, the rest of the page still works
+var map = null;
+if (typeof L !== 'undefined') {
+  map = L.map('map').setView([12.8412, 80.1538], 17);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+} else {
+  document.getElementById('map').innerHTML = '<p class="small" style="padding:10px">Map could not load (no internet). Everything else still works.</p>';
+}
+
+var markers = {};
+var allBins = {};   // bins by id, kept up to date by events
+var colors = { ok: '#2e7d32', half: '#e69500', full: '#c62828', offline: '#888' };
+var THRESHOLD = 20; // same as the arduino code
+
+function timeAgo(t) {
+  if (!t || t.startsWith('0001')) return 'never';
+  var sec = Math.floor((Date.now() - new Date(t)) / 1000);
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + ' min ago';
+  return Math.floor(sec / 3600) + ' hr ago';
+}
+
+function addLog(text) {
+  var log = document.getElementById('log');
+  var line = document.createElement('div');
+  line.innerText = new Date().toLocaleTimeString() + '  ' + text;
+  log.insertBefore(line, log.firstChild);
+  while (log.childNodes.length > 100) log.removeChild(log.lastChild);
+}
+
+// ---------- hardware panel ----------
+
+function drawHardware() {
+  var hw = Object.values(allBins).filter(b => b.source == 'usb' || b.source == 'wifi');
+  var div = document.getElementById('hwbins');
+  if (hw.length == 0) {
+    div.innerHTML = '<span class="small">No hardware connected. Plug in the Arduino and start the server with the serial option set to auto.</span>';
+    return;
+  }
+  var html = '';
+  hw.forEach(b => {
+    var hand = b.hand_cm > 0 ? b.hand_cm : 0;
+    var handWidth = Math.min(hand, 50) * 4; // 50cm = full bar (200px)
+    html += '<div class="hwbin">' +
+      '<h3>' + b.name + ' (' + b.id + ') <span class="small">via ' + b.source.toUpperCase() + '</span></h3>' +
+      'Lid: <span class="lid ' + (b.lid_open ? 'open' : 'closed') + '">' + (b.lid_open ? 'OPEN' : 'CLOSED') + '</span><br><br>' +
+      'Hand distance: <span class="handbar"><div style="width:' + handWidth + 'px"></div><span class="mark"></span></span> ' +
+      '<b>' + (hand >= 400 ? 'nothing in front' : hand + ' cm') + '</b><br>' +
+      '<span class="small">The red line is at ' + THRESHOLD + ' cm. The lid opens when a hand is closer than this.</span><br><br>' +
+      'Fill: <b class="' + b.status + '">' + b.fill_percent + '% (' + b.status.toUpperCase() + ')</b><br>' +
+      'Lid opens today: <b>' + b.lid_opens + '</b>' +
+      '</div>';
+  });
+  div.innerHTML = html;
+}
+
+// ---------- normal tables ----------
+
+var demoMode = false;
+
+// what kind of data a bin has
+function dataTag(b) {
+  if (b.source) return '<span class="tag real">REAL ' + b.source.toUpperCase() + '</span>';
+  if (b.real) return '<span class="tag none">REAL NOT CONNECTED</span>';
+  if (demoMode) return '<span class="tag sim">SIMULATED</span>';
+  return '<span class="tag none">NO HARDWARE</span>';
+}
+
+function binRow(b) {
+  var lid = b.source ? (b.lid_open ? 'OPEN' : 'closed') : 'unknown';
+  return '<tr id="row-' + b.id + '">' +
+    '<td>' + b.id + '</td>' +
+    '<td>' + b.name + '</td>' +
+    '<td>' + b.zone + '</td>' +
+    '<td>' + dataTag(b) + '</td>' +
+    '<td><span class="bar"><div style="width:' + b.fill_percent + '%; background:' + colors[b.status] + '"></div></span> ' + b.fill_percent + '%</td>' +
+    '<td class="' + b.status + '">' + b.status.toUpperCase() + '</td>' +
+    '<td>' + lid + '</td>' +
+    '<td>' + (b.battery ? b.battery.toFixed(2) + ' V' : 'none') + '</td>' +
+    '<td>' + b.lid_opens + '</td>' +
+    '<td>' + timeAgo(b.last_seen) + '</td>' +
+    '</tr>';
+}
+
+function loadBins() {
+  var zone = document.getElementById('zoneFilter').value;
+  var head = '<tr><th>ID</th><th>Location</th><th>Zone</th><th>Data</th><th>Fill</th><th>Status</th><th>Lid</th><th>Battery</th><th>Lid Opens</th><th>Last Seen</th></tr>';
+  var realHtml = head, simHtml = head, realCount = 0;
+
+  Object.values(allBins).sort((a, b) => a.id < b.id ? -1 : 1).forEach(b => {
+    if (b.real || b.source) {
+      realHtml += binRow(b);
+      realCount++;
+    } else {
+      if (zone && b.zone != zone) return;
+      simHtml += binRow(b);
+    }
+  });
+
+  if (realCount == 0) {
+    realHtml += '<tr><td colspan="10" class="small">No real bin has connected yet. Plug in the Arduino and start the server with the serial option set to auto.</td></tr>';
+  }
+  document.getElementById('realBins').innerHTML = realHtml;
+  document.getElementById('bins').innerHTML = simHtml;
+}
+
+function loadInfo() {
+  return fetch('/api/info').then(r => r.json()).then(info => {
+    demoMode = info.simulator;
+    document.getElementById('demoBanner').style.display = demoMode ? 'block' : 'none';
+    var box = document.getElementById('simSection');
+    if (demoMode) {
+      box.className = 'box demo-box';
+      document.getElementById('simTitle').innerText = 'Demo Section: Simulated Bins (not real data)';
+      document.getElementById('simNote').innerText = 'These bins have no hardware. Their fill level, battery and lid opens are generated by the simulator to show how the system would look with sensors on every bin.';
+    } else {
+      box.className = 'box';
+      document.getElementById('simTitle').innerText = 'Bins Without Hardware';
+      document.getElementById('simNote').innerText = 'Planned bin locations. No sensor is fitted yet, so they show as offline.';
+    }
+  });
+}
+
+function drawMarker(b) {
+  if (!map) return;
+  var kind = b.source ? 'REAL (' + b.source.toUpperCase() + ')' : (b.real ? 'REAL (not connected)' : (demoMode ? 'SIMULATED demo data' : 'no hardware'));
+  var popup = '<b>' + b.name + '</b><br>' + b.id + '<br><i>' + kind + '</i><br>Fill: ' + b.fill_percent + '%<br>Status: ' + b.status +
+    (b.source ? '<br>Lid: ' + (b.lid_open ? 'OPEN' : 'closed') : '');
+  var dash = (!b.real && !b.source && demoMode) ? '4 3' : null; // dashed outline = simulated
+  var radius = b.lid_open ? 15 : 9; // marker grows when someone is using the bin
+  if (markers[b.id]) {
+    markers[b.id].setStyle({ fillColor: colors[b.status], weight: b.source ? 3 : 1, dashArray: dash });
+    markers[b.id].setRadius(radius);
+    markers[b.id].setPopupContent(popup);
+  } else {
+    markers[b.id] = L.circleMarker([b.lat, b.lng], {
+      radius: radius, color: '#333', weight: b.source ? 3 : 1, dashArray: dash, fillColor: colors[b.status], fillOpacity: 0.9
+    }).addTo(map).bindPopup(popup);
+  }
+}
+
+function loadAllBins() {
+  return fetch('/api/bins').then(r => r.json()).then(bins => {
+    allBins = {};
+    bins.forEach(b => { allBins[b.id] = b; drawMarker(b); });
+    loadBins();
+    drawHardware();
+  });
+}
+
+function loadZones() {
+  fetch('/api/zones').then(r => r.json()).then(zones => {
+    var html = '<tr><th>Zone</th><th>Bins</th><th>Avg Fill</th><th>Full</th><th>Opens Today</th></tr>';
+    zones.forEach(z => {
+      html += '<tr><td>' + z.zone + '</td><td>' + z.total_bins + '</td><td>' + z.avg_fill + '%</td><td>' + z.full_bins + '</td><td>' + z.opens_today + '</td></tr>';
+    });
+    document.getElementById('zones').innerHTML = html;
+  });
+}
+
+function loadAlerts() {
+  fetch('/api/alerts').then(r => r.json()).then(alerts => {
+    document.getElementById('alertCount').innerText = alerts.length;
+    if (alerts.length == 0) {
+      document.getElementById('alerts').innerHTML = '<span class="small">No open alerts</span>';
+      return;
+    }
+    var html = '';
+    alerts.forEach(a => {
+      html += '<div class="alert ' + a.type + '">' +
+        '<button onclick="resolve(' + a.id + ')">Done</button>' +
+        '<b>' + a.type.replace('_', ' ') + '</b>: ' + a.message +
+        '<br><span class="small">' + new Date(a.created).toLocaleTimeString() + '</span></div>';
+    });
+    document.getElementById('alerts').innerHTML = html;
+  });
+}
+
+function loadRoute() {
+  fetch('/api/route').then(r => r.json()).then(bins => {
+    if (bins.length == 0) {
+      document.getElementById('route').innerText = 'Nothing to collect right now';
+      return;
+    }
+    document.getElementById('route').innerHTML = bins.map((b, i) =>
+      (i + 1) + '. ' + b.name + ' (' + b.fill_percent + '%)').join(', then ');
+  });
+}
+
+function resolve(id) {
+  fetch('/api/alerts/' + id + '/resolve', { method: 'POST' }).then(loadAlerts);
+}
+
+function refreshAll() {
+  document.getElementById('zoneNote').innerText = demoMode ? '(includes simulated bins)' : '';
+  loadAllBins(); loadZones(); loadAlerts(); loadRoute();
+  document.getElementById('updated').innerText = new Date().toLocaleTimeString();
+}
+
+// the simulator sends a lot of readings, so we redraw the tables at most once per second
+var refreshPending = false;
+function refreshSoon() {
+  if (refreshPending) return;
+  refreshPending = true;
+  setTimeout(function () { refreshPending = false; refreshAll(); }, 1000);
+}
+
+function flashRow(id) {
+  var row = document.getElementById('row-' + id);
+  if (!row) return;
+  row.className = 'flash';
+  setTimeout(function () { row.className = ''; }, 800);
+}
+
+// ---------- live events from the server ----------
+
+function handleEvent(e) {
+  var b = allBins[e.bin_id];
+  var name = b ? b.name : e.bin_id;
+
+  if (e.type == 'hand') {
+    // comes 2 times a second, only update the hardware panel
+    if (b) { b.hand_cm = e.data; drawHardware(); }
+    return;
+  }
+
+  if (e.type == 'lid') {
+    if (b) {
+      b.lid_open = e.data.open;
+      b.lid_opens = e.data.lid_opens;
+      drawMarker(b); drawHardware(); loadBins(); flashRow(b.id);
+    }
+    addLog(name + ': lid ' + (e.data.open ? 'OPENED' : 'closed'));
+    return;
+  }
+
+  if (e.type == 'reading') {
+    allBins[e.bin_id] = e.data;
+    drawMarker(e.data);
+    if (e.data.source) {
+      drawHardware();
+      addLog(name + ': fill ' + e.data.fill_percent + '%');
+    }
+    refreshSoon();
+    return;
+  }
+
+  if (e.type == 'connected') addLog(name + ' CONNECTED via ' + e.data);
+  if (e.type == 'disconnected') addLog(name + ' DISCONNECTED');
+  if (e.type == 'alert') addLog('ALERT ' + e.data.type.replace('_', ' ') + ': ' + e.data.message);
+  if (e.type == 'status' && b && b.source) addLog(name + ' is now ' + e.data.toUpperCase());
+
+  refreshSoon();
+}
+
+function connectLive() {
+  var es = new EventSource('/api/stream');
+  es.onopen = function () {
+    document.getElementById('liveStatus').innerText = 'connected';
+    loadInfo().then(refreshAll); // catch up on anything missed while disconnected (also if server restarted with other flags)
+  };
+  es.onmessage = function (msg) {
+    handleEvent(JSON.parse(msg.data));
+  };
+  es.onerror = function () {
+    // browser reconnects on its own
+    document.getElementById('liveStatus').innerText = 'reconnecting';
+  };
+}
+
+loadInfo().then(refreshAll);
+connectLive();
+// backup refresh every 15 sec in case some event was missed
+setInterval(refreshAll, 15000);
+</script>
+</body>
+</html>
